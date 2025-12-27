@@ -456,6 +456,42 @@ namespace Oxide.Plugins
             return !player.IsConnected && player.userID < 10000000000000000UL;
         }
 
+        private bool IsNpcLoot(BaseEntity entity)
+        {
+            LootableCorpse corpse = entity as LootableCorpse;
+            if (corpse != null)
+            {
+                if (corpse.playerSteamID != 0 && corpse.playerSteamID < 10000000000000000UL)
+                    return true;
+
+                if (corpse.OwnerID != 0 && corpse.OwnerID < 10000000000000000UL)
+                    return true;
+
+                return corpse.playerSteamID == 0 && corpse.OwnerID == 0;
+            }
+
+            DroppedItemContainer dropped = entity as DroppedItemContainer;
+            if (dropped == null)
+            {
+                StashContainer stash = entity as StashContainer;
+                if (stash == null)
+                    return false;
+
+                if (stash.OwnerID != 0 && stash.OwnerID < 10000000000000000UL)
+                    return true;
+
+                return stash.OwnerID == 0;
+            }
+
+            if (dropped.playerSteamID != 0 && dropped.playerSteamID < 10000000000000000UL)
+                return true;
+
+            if (dropped.OwnerID != 0 && dropped.OwnerID < 10000000000000000UL)
+                return true;
+
+            return dropped.playerSteamID == 0 && dropped.OwnerID == 0;
+        }
+
         private bool IsVendingMachine(BaseEntity entity)
         {
             return entity is VendingMachine;
@@ -544,6 +580,9 @@ namespace Oxide.Plugins
 
             BasePlayer attacker = info.InitiatorPlayer;
 
+            if (attacker != null && entity is GunTrap && entity.OwnerID == 0)
+                return null;
+
             if (entity is BaseAnimalNPC || info.Initiator is BaseAnimalNPC)
                 return null;
 
@@ -587,6 +626,9 @@ namespace Oxide.Plugins
             if (IsVendingMachine(entity))
                 return null;
 
+            if (IsNpcLoot(entity))
+                return null;
+
             if (IsHumanNPC(entity) || !IsPlayerPlaced(entity))
                 return null;
 
@@ -625,6 +667,9 @@ namespace Oxide.Plugins
         {
             // ✅ Allow vending machine use
             if (IsVendingMachine(entity))
+                return null;
+
+            if (IsNpcLoot(entity))
                 return null;
 
             if (IsToggleAccess(entity))
@@ -819,6 +864,9 @@ namespace Oxide.Plugins
         {
             if (IsVendingMachine(entity))
                 return null; // buying ≠ looting
+
+            if (IsNpcLoot(entity))
+                return null;
 
             if (IsHumanNPC(entity) || !IsPlayerPlaced(entity))
                 return null;
