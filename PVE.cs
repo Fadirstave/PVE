@@ -447,6 +447,18 @@ namespace Oxide.Plugins
             return entity.OwnerID != 0;
         }
 
+        private bool IsUnownedDeployable(BaseEntity entity)
+        {
+            if (entity == null)
+                return false;
+
+            if (entity.OwnerID != 0)
+                return false;
+
+            return !string.IsNullOrEmpty(entity.PrefabName) &&
+                entity.PrefabName.IndexOf("/deployable/", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
         private bool IsHumanNPC(BaseEntity entity)
         {
             BasePlayer player = entity as BasePlayer;
@@ -581,6 +593,12 @@ namespace Oxide.Plugins
             BasePlayer attacker = info.InitiatorPlayer;
 
             if (attacker != null && entity is GunTrap && entity.OwnerID == 0)
+                return null;
+
+            if (attacker != null && entity is StorageContainer && entity.OwnerID == 0)
+                return null;
+
+            if (attacker != null && IsUnownedDeployable(entity))
                 return null;
 
             if (entity is BaseAnimalNPC || info.Initiator is BaseAnimalNPC)
@@ -866,6 +884,9 @@ namespace Oxide.Plugins
                 return null; // buying ≠ looting
 
             if (IsNpcLoot(entity))
+                return null;
+
+            if (IsUnownedDeployable(entity))
                 return null;
 
             if (IsHumanNPC(entity) || !IsPlayerPlaced(entity))
