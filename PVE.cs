@@ -459,6 +459,33 @@ namespace Oxide.Plugins
                 entity.PrefabName.IndexOf("/deployable/", StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
+        private bool IsUnownedPlanter(BaseEntity entity)
+        {
+            if (entity == null)
+                return false;
+
+            if (GetOwnerId(entity) != 0)
+                return false;
+
+            if (entity is PlanterBox)
+                return true;
+
+            string shortName = entity.ShortPrefabName ?? string.Empty;
+            if (shortName.IndexOf("planter", StringComparison.OrdinalIgnoreCase) >= 0)
+                return true;
+
+            string prefabName = entity.PrefabName ?? string.Empty;
+            return prefabName.IndexOf("planter", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private bool IsUnownedIoEntity(BaseEntity entity)
+        {
+            if (!(entity is IOEntity))
+                return false;
+
+            return GetOwnerId(entity) == 0;
+        }
+
         private bool IsHumanNPC(BaseEntity entity)
         {
             BasePlayer player = entity as BasePlayer;
@@ -644,6 +671,9 @@ namespace Oxide.Plugins
             if (IsVendingMachine(entity))
                 return null;
 
+            if (IsUnownedPlanter(entity))
+                return null;
+
             if (IsNpcLoot(entity))
                 return null;
 
@@ -685,6 +715,9 @@ namespace Oxide.Plugins
         {
             // ✅ Allow vending machine use
             if (IsVendingMachine(entity))
+                return null;
+
+            if (IsUnownedPlanter(entity))
                 return null;
 
             if (IsNpcLoot(entity))
@@ -783,6 +816,9 @@ namespace Oxide.Plugins
             if (planter == null)
                 return null;
 
+            if (IsUnownedPlanter(planter))
+                return null;
+
             if (IsToggleAccess(planter))
                 return null;
 
@@ -802,6 +838,9 @@ namespace Oxide.Plugins
         private object OnSwitchToggle(IOEntity entity, BasePlayer player)
         {
             if (entity == null || player == null)
+                return null;
+
+            if (IsUnownedIoEntity(entity))
                 return null;
 
             if (IsToggleAccess(entity))
@@ -884,6 +923,9 @@ namespace Oxide.Plugins
                 return null; // buying ≠ looting
 
             if (IsNpcLoot(entity))
+                return null;
+
+            if (IsUnownedPlanter(entity))
                 return null;
 
             if (IsUnownedDeployable(entity))
