@@ -29,53 +29,22 @@ namespace Oxide.Plugins
 
         private readonly Dictionary<ulong, float> lastInteractionMessage = new Dictionary<ulong, float>();
         private readonly Dictionary<ulong, float> lastDamageMessage = new Dictionary<ulong, float>();
-        private readonly List<ToggleGroup> toggleGroupList = new List<ToggleGroup>();
-        private readonly Dictionary<string, ToggleGroup> toggleGroupLookup = new Dictionary<string, ToggleGroup>(StringComparer.OrdinalIgnoreCase);
+        private const float ToggleRaycastDistance = 2f;
+
+        private readonly Dictionary<string, List<string>> legacyGroupItems = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
         private StoredData storedData;
 
         private class StoredData
         {
+            public Dictionary<ulong, HashSet<string>> SharedItemsByOwner = new Dictionary<ulong, HashSet<string>>();
             public Dictionary<ulong, HashSet<string>> EnabledGroupsByOwner = new Dictionary<ulong, HashSet<string>>();
-        }
-
-        private class ToggleItem
-        {
-            public string DisplayName { get; private set; }
-            public string PrefabName { get; private set; }
-            public string PrefabKey { get; private set; }
-
-            public ToggleItem(string displayName, string prefabName)
-            {
-                DisplayName = displayName;
-                PrefabName = prefabName;
-                PrefabKey = prefabName.ToLowerInvariant();
-            }
-        }
-
-        private class ToggleGroup
-        {
-            public string Name { get; private set; }
-            public bool Enabled { get; set; }
-            public List<ToggleItem> Items { get; private set; }
-            public HashSet<string> PrefabKeys { get; private set; }
-
-            public ToggleGroup(string name, IEnumerable<ToggleItem> items)
-            {
-                Name = name;
-                Items = new List<ToggleItem>(items);
-                PrefabKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                foreach (ToggleItem item in Items)
-                {
-                    PrefabKeys.Add(item.PrefabKey);
-                }
-            }
         }
 
         private void Init()
         {
             permission.RegisterPermission(PermissionBypass, this);
+            RegisterLegacyGroupItems();
             LoadData();
-            RegisterToggleGroups();
         }
 
         private void SaveData()
@@ -86,8 +55,12 @@ namespace Oxide.Plugins
         private void LoadData()
         {
             storedData = Interface.Oxide.DataFileSystem.ReadObject<StoredData>(Name) ?? new StoredData();
+            if (storedData.SharedItemsByOwner == null)
+                storedData.SharedItemsByOwner = new Dictionary<ulong, HashSet<string>>();
             if (storedData.EnabledGroupsByOwner == null)
                 storedData.EnabledGroupsByOwner = new Dictionary<ulong, HashSet<string>>();
+
+            MigrateLegacyToggleGroups();
         }
 
         private void OnServerSave()
@@ -100,114 +73,121 @@ namespace Oxide.Plugins
             SaveData();
         }
 
-        private void RegisterToggleGroups()
+        private void RegisterLegacyGroupItems()
         {
-            toggleGroupList.Clear();
-            toggleGroupLookup.Clear();
+            legacyGroupItems.Clear();
 
-            AddToggleGroup("Building", new[]
+            AddToggleItems("Building", new[]
             {
-                new ToggleItem("Tool Cupboard", "cupboard.tool")
+                "cupboard.tool"
             });
 
-            AddToggleGroup("Comfort", new[]
+            AddToggleItems("Comfort", new[]
             {
-                new ToggleItem("Bed", "bed"),
-                new ToggleItem("Chair", "chair"),
-                new ToggleItem("Sofa", "sofa"),
-                new ToggleItem("Sofa Pattern", "sofa.pattern"),
-                new ToggleItem("BBQ", "bbq"),
-                new ToggleItem("Camp Fire", "campfire"),
-                new ToggleItem("Electric Heater", "electric.heater")
+                "bed",
+                "chair",
+                "sofa",
+                "sofa.pattern",
+                "bbq",
+                "campfire",
+                "electric.heater"
             });
 
-            AddToggleGroup("Crafting", new[]
+            AddToggleItems("Crafting", new[]
             {
-                new ToggleItem("Repair Bench", "box.repair.bench"),
-                new ToggleItem("Repair Bench", "repairbench"),
-                new ToggleItem("Research Table", "research.table"),
-                new ToggleItem("Research Table", "researchtable"),
-                new ToggleItem("Mixing Table", "mixingtable"),
-                new ToggleItem("Composter", "composter")
+                "box.repair.bench",
+                "repairbench",
+                "research.table",
+                "researchtable",
+                "mixingtable",
+                "composter"
             });
 
-            AddToggleGroup("Farm", new[]
+            AddToggleItems("Farm", new[]
             {
-                new ToggleItem("Bathtub Planter", "bathtub.planter"),
-                new ToggleItem("Large Planter", "planter.large"),
-                new ToggleItem("Minecart Planter", "minecart.planter"),
-                new ToggleItem("Rail Road Planter", "rail.road.planter"),
-                new ToggleItem("Small Planter", "planter.small"),
-                new ToggleItem("Triangle Planter", "planter.triangle"),
-                new ToggleItem("Triangle Rail Road Planter", "triangle.rail.road.planter"),
-                new ToggleItem("Hitch & Trough", "hitchtrough")
+                "bathtub.planter",
+                "planter.large",
+                "minecart.planter",
+                "rail.road.planter",
+                "planter.small",
+                "planter.triangle",
+                "triangle.rail.road.planter",
+                "hitchtrough"
             });
 
-            AddToggleGroup("Furnace", new[]
+            AddToggleItems("Furnace", new[]
             {
-                new ToggleItem("Electric Furnace", "electric.furnace"),
-                new ToggleItem("Furnace", "furnace"),
-                new ToggleItem("Large Furnace", "furnace.large"),
-                new ToggleItem("Small Oil Refinery", "small.oil.refinery")
+                "electric.furnace",
+                "furnace",
+                "furnace.large",
+                "small.oil.refinery"
             });
 
-            AddToggleGroup("Storage", new[]
+            AddToggleItems("Storage", new[]
             {
-                new ToggleItem("Storage Box", "box.wooden"),
-                new ToggleItem("Large Wood Box", "box.wooden.large"),
-                new ToggleItem("Locker", "locker"),
-                new ToggleItem("Drop Box", "dropbox"),
-                new ToggleItem("Mailbox", "mailbox"),
-                new ToggleItem("Fridge", "fridge"),
-                new ToggleItem("Mini Fridge", "mini fridge")
+                "box.wooden",
+                "box.wooden.large",
+                "locker",
+                "dropbox",
+                "mailbox",
+                "fridge",
+                "mini fridge"
             });
 
-            AddToggleGroup("Switch", new[]
+            AddToggleItems("Switch", new[]
             {
-                new ToggleItem("Electric Switch", "electrical.switch"),
-                new ToggleItem("Electric Switch", "switch")
+                "electrical.switch",
+                "switch"
             });
 
-            AddToggleGroup("Water", new[]
+            AddToggleItems("Water", new[]
             {
-                new ToggleItem("Water Catcher (Small)", "water.catcher.small"),
-                new ToggleItem("Water Catcher (Large)", "water.catcher.large"),
-                new ToggleItem("Water Barrel", "water.barrel")
+                "water.catcher.small",
+                "water.catcher.large",
+                "water.barrel"
             });
         }
 
-        private void AddToggleGroup(string name, IEnumerable<ToggleItem> items)
+        private void AddToggleItems(string legacyGroupName, IEnumerable<string> items)
         {
-            ToggleGroup group = new ToggleGroup(name, items);
-            toggleGroupList.Add(group);
-            toggleGroupLookup[name] = group;
-        }
-
-        private HashSet<string> GetOwnerGroups(ulong ownerId)
-        {
-            HashSet<string> groups;
-            if (!storedData.EnabledGroupsByOwner.TryGetValue(ownerId, out groups))
+            List<string> legacyItems;
+            if (!legacyGroupItems.TryGetValue(legacyGroupName, out legacyItems))
             {
-                groups = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                storedData.EnabledGroupsByOwner[ownerId] = groups;
+                legacyItems = new List<string>();
+                legacyGroupItems[legacyGroupName] = legacyItems;
             }
 
-            return groups;
+            foreach (string item in items)
+            {
+                legacyItems.Add(item.ToLowerInvariant());
+            }
         }
 
-        private bool IsGroupEnabledForOwner(ulong ownerId, string groupName)
+        private HashSet<string> GetOwnerItems(ulong ownerId)
         {
-            HashSet<string> groups = GetOwnerGroups(ownerId);
-            return groups.Contains(groupName);
+            HashSet<string> items;
+            if (!storedData.SharedItemsByOwner.TryGetValue(ownerId, out items))
+            {
+                items = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                storedData.SharedItemsByOwner[ownerId] = items;
+            }
+
+            return items;
         }
 
-        private void SetGroupEnabledForOwner(ulong ownerId, string groupName, bool enabled)
+        private bool IsItemSharedForOwner(ulong ownerId, string itemKey)
         {
-            HashSet<string> groups = GetOwnerGroups(ownerId);
+            HashSet<string> items = GetOwnerItems(ownerId);
+            return items.Contains(itemKey);
+        }
+
+        private void SetItemSharedForOwner(ulong ownerId, string itemKey, bool enabled)
+        {
+            HashSet<string> items = GetOwnerItems(ownerId);
             if (enabled)
-                groups.Add(groupName);
+                items.Add(itemKey);
             else
-                groups.Remove(groupName);
+                items.Remove(itemKey);
         }
 
         private void NotifyInteraction(BasePlayer player, string message)
@@ -252,113 +232,100 @@ namespace Oxide.Plugins
 
             if (args.Length == 0)
             {
-                player.ChatMessage(Prefix + "Usage: /pve toggle <group>");
+                player.ChatMessage(Prefix + "Usage: /pve toggle [item.shortname]");
                 return;
             }
 
             if (!args[0].Equals("toggle", StringComparison.OrdinalIgnoreCase))
             {
-                player.ChatMessage(Prefix + "Unknown command. Use /pve toggle to list groups.");
+                player.ChatMessage(Prefix + "Unknown command. Use /pve toggle to manage shared items.");
                 return;
             }
 
             if (args.Length == 1)
             {
-                ListToggleGroups(player);
-                return;
-            }
-
-            if (args[1].Equals("all", StringComparison.OrdinalIgnoreCase))
-            {
-                if (args.Length == 2)
+                string toggleMessage;
+                if (TryToggleLookedItem(player, out toggleMessage))
                 {
-                    SetAllToggleGroups(player.userID, true);
-                    player.ChatMessage(Prefix + "All groups toggled on.");
+                    player.ChatMessage(toggleMessage);
                     return;
                 }
 
-                bool enableAll;
-                if (TryParseToggleState(args[2], out enableAll))
-                {
-                    SetAllToggleGroups(player.userID, enableAll);
-                    string stateLabel = enableAll ? "on" : "off";
-                    player.ChatMessage(string.Format("{0}All groups toggled {1}.", Prefix, stateLabel));
-                    return;
-                }
-
-                player.ChatMessage(Prefix + "Usage: /pve toggle all <on|off>");
+                ListSharedItems(player);
                 return;
             }
 
-            string groupName = string.Join(" ", args, 1, args.Length - 1);
-            ToggleGroup group;
-            if (!toggleGroupLookup.TryGetValue(groupName, out group))
+            string itemKey = string.Join(" ", args, 1, args.Length - 1);
+            HashSet<string> sharedItems = GetOwnerItems(player.userID);
+            if (sharedItems.Remove(itemKey))
             {
-                player.ChatMessage(Prefix + "Unknown toggle group. Use /pve toggle to list groups.");
+                SaveData();
+                player.ChatMessage(string.Format("{0}Stopped sharing {1}.", Prefix, GetItemDisplayName(itemKey)));
                 return;
             }
 
-            bool enabled = !IsGroupEnabledForOwner(player.userID, group.Name);
-            SetGroupEnabledForOwner(player.userID, group.Name, enabled);
+            player.ChatMessage(string.Format("{0}{1} is not currently shared.", Prefix, GetItemDisplayName(itemKey)));
+        }
+
+        private void ListSharedItems(BasePlayer player)
+        {
+            HashSet<string> sharedItems = GetOwnerItems(player.userID);
+            if (sharedItems.Count == 0)
+            {
+                player.ChatMessage(Prefix + "You are not sharing any items.");
+                return;
+            }
+
+            player.ChatMessage(Prefix + "You are sharing:");
+            List<string> entries = new List<string>();
+            foreach (string itemKey in sharedItems)
+            {
+                string displayName = GetItemDisplayName(itemKey);
+                entries.Add(string.Format("{0} ({1})", displayName, itemKey));
+            }
+
+            entries.Sort(StringComparer.OrdinalIgnoreCase);
+            foreach (string entry in entries)
+            {
+                player.ChatMessage(string.Format("{0}{1}", Prefix, entry));
+            }
+        }
+
+        private bool TryToggleLookedItem(BasePlayer player, out string message)
+        {
+            message = null;
+
+            BaseEntity entity;
+            if (!TryGetLookEntity(player, out entity))
+                return false;
+
+            string itemKey;
+            string displayName;
+            if (!TryGetShareKeyForEntity(entity, out itemKey, out displayName))
+                return false;
+
+            bool enabled = !IsItemSharedForOwner(player.userID, itemKey);
+            SetItemSharedForOwner(player.userID, itemKey, enabled);
             SaveData();
-            string status = enabled ? "on" : "off";
-            string accessMessage = enabled ? "can now access" : "can no longer access";
-            player.ChatMessage(string.Format("{0}Group {1} toggled {2}, players {3} these items.", Prefix, group.Name, status, accessMessage));
+
+            string status = enabled ? "now sharing" : "no longer sharing";
+            message = string.Format("{0}You are {1} {2}.", Prefix, status, displayName);
+            return true;
         }
 
-        private void ListToggleGroups(BasePlayer player)
+        private bool TryGetLookEntity(BasePlayer player, out BaseEntity entity)
         {
-            player.ChatMessage(Prefix + "Available toggle groups:");
-            string allStatus = AreAllGroupsEnabled(player.userID) ? "on" : "off";
-            player.ChatMessage(string.Format("{0}All ({1})", Prefix, allStatus));
-            foreach (ToggleGroup group in GetSortedToggleGroups())
-            {
-                string status = IsGroupEnabledForOwner(player.userID, group.Name) ? "on" : "off";
-                player.ChatMessage(string.Format("{0}{1} ({2})", Prefix, group.Name, status));
-            }
-        }
+            entity = null;
+            if (player == null)
+                return false;
 
-        private bool AreAllGroupsEnabled(ulong ownerId)
-        {
-            foreach (ToggleGroup group in toggleGroupList)
-            {
-                if (!IsGroupEnabledForOwner(ownerId, group.Name))
-                    return false;
-            }
+            RaycastHit hit;
+            if (!Physics.Raycast(player.eyes.HeadRay(), out hit, ToggleRaycastDistance,
+                Layers.Mask.Deployed | Layers.Mask.Default | Layers.Mask.Construction))
+                return false;
 
-            return toggleGroupList.Count > 0;
-        }
-
-        private void SetAllToggleGroups(ulong ownerId, bool enabled)
-        {
-            foreach (ToggleGroup group in toggleGroupList)
-            {
-                SetGroupEnabledForOwner(ownerId, group.Name, enabled);
-            }
-
-            SaveData();
-        }
-
-        private bool TryParseToggleState(string value, out bool enabled)
-        {
-            enabled = false;
-            if (value.Equals("on", StringComparison.OrdinalIgnoreCase))
-            {
-                enabled = true;
-                return true;
-            }
-
-            if (value.Equals("off", StringComparison.OrdinalIgnoreCase))
-                return true;
-
-            return false;
-        }
-
-        private List<ToggleGroup> GetSortedToggleGroups()
-        {
-            List<ToggleGroup> groups = new List<ToggleGroup>(toggleGroupList);
-            groups.Sort((left, right) => string.Compare(left.Name, right.Name, StringComparison.OrdinalIgnoreCase));
-            return groups;
+            entity = hit.GetEntity();
+            return entity != null;
         }
 
         /* =========================
@@ -545,6 +512,26 @@ namespace Oxide.Plugins
             if (ownerId == 0)
                 return false;
 
+            HashSet<string> sharedItems = GetOwnerItems(ownerId);
+            if (sharedItems.Count == 0)
+                return false;
+
+            foreach (string itemKey in sharedItems)
+            {
+                if (EntityMatchesPrefabKey(entity, itemKey))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private bool EntityMatchesPrefabKey(BaseEntity entity, string prefabKey)
+        {
+            if (entity == null || string.IsNullOrEmpty(prefabKey))
+                return false;
+
             string shortName = entity.ShortPrefabName;
             string prefabName = entity.PrefabName;
             if (string.IsNullOrEmpty(shortName))
@@ -561,31 +548,57 @@ namespace Oxide.Plugins
 
             string normalizedShortName = NormalizePrefabKey(shortName);
             string normalizedPrefabName = NormalizePrefabKey(prefabName);
-            foreach (ToggleGroup group in toggleGroupList)
-            {
-                if (!IsGroupEnabledForOwner(ownerId, group.Name))
-                    continue;
+            string normalizedKey = NormalizePrefabKey(prefabKey);
 
-                foreach (string prefabKey in group.PrefabKeys)
-                {
-                    string normalizedKey = NormalizePrefabKey(prefabKey);
-                    if (prefabKey.Equals(shortName, StringComparison.OrdinalIgnoreCase))
-                        return true;
+            if (prefabKey.Equals(shortName, StringComparison.OrdinalIgnoreCase))
+                return true;
 
-                    if (!string.IsNullOrEmpty(normalizedKey) &&
-                        normalizedKey.Equals(normalizedShortName, StringComparison.OrdinalIgnoreCase))
-                        return true;
+            if (!string.IsNullOrEmpty(normalizedKey) &&
+                normalizedKey.Equals(normalizedShortName, StringComparison.OrdinalIgnoreCase))
+                return true;
 
-                    if (prefabName.IndexOf(prefabKey, StringComparison.OrdinalIgnoreCase) >= 0)
-                        return true;
+            if (prefabName.IndexOf(prefabKey, StringComparison.OrdinalIgnoreCase) >= 0)
+                return true;
 
-                    if (!string.IsNullOrEmpty(normalizedKey) &&
-                        normalizedPrefabName.IndexOf(normalizedKey, StringComparison.OrdinalIgnoreCase) >= 0)
-                        return true;
-                }
-            }
+            if (!string.IsNullOrEmpty(normalizedKey) &&
+                normalizedPrefabName.IndexOf(normalizedKey, StringComparison.OrdinalIgnoreCase) >= 0)
+                return true;
 
             return false;
+        }
+
+        private bool TryGetShareKeyForEntity(BaseEntity entity, out string itemKey, out string displayName)
+        {
+            itemKey = null;
+            displayName = null;
+            if (entity == null)
+                return false;
+
+            string shortName = entity.ShortPrefabName;
+            if (string.IsNullOrEmpty(shortName))
+                shortName = entity.PrefabName;
+
+            if (string.IsNullOrEmpty(shortName))
+                return false;
+
+            itemKey = shortName.ToLowerInvariant();
+            displayName = GetItemDisplayName(itemKey, entity);
+            return true;
+        }
+
+        private string GetItemDisplayName(string itemKey, BaseEntity entity = null)
+        {
+            if (string.IsNullOrEmpty(itemKey))
+                return "Unknown Item";
+
+            ItemDefinition definition = ItemManager.FindItemDefinition(itemKey);
+            if (definition != null && definition.displayName != null)
+                return definition.displayName.english;
+
+            if (entity != null && !string.IsNullOrEmpty(entity.ShortPrefabName))
+                return entity.ShortPrefabName;
+
+            return itemKey;
         }
 
         private string NormalizePrefabKey(string value)
@@ -606,6 +619,39 @@ namespace Oxide.Plugins
             }
 
             return index == 0 ? string.Empty : new string(buffer, 0, index);
+        }
+
+        private void MigrateLegacyToggleGroups()
+        {
+            if (storedData == null || storedData.EnabledGroupsByOwner == null)
+                return;
+
+            if (storedData.SharedItemsByOwner == null)
+                storedData.SharedItemsByOwner = new Dictionary<ulong, HashSet<string>>();
+
+            bool migrated = false;
+            foreach (KeyValuePair<ulong, HashSet<string>> entry in storedData.EnabledGroupsByOwner)
+            {
+                if (entry.Value == null || entry.Value.Count == 0)
+                    continue;
+
+                HashSet<string> sharedItems = GetOwnerItems(entry.Key);
+                foreach (string groupName in entry.Value)
+                {
+                    List<string> legacyItems;
+                    if (!legacyGroupItems.TryGetValue(groupName, out legacyItems))
+                        continue;
+
+                    foreach (string itemKey in legacyItems)
+                    {
+                        sharedItems.Add(itemKey);
+                        migrated = true;
+                    }
+                }
+            }
+
+            if (migrated)
+                storedData.EnabledGroupsByOwner = new Dictionary<ulong, HashSet<string>>();
         }
 
         /* =========================
