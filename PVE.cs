@@ -31,19 +31,16 @@ namespace Oxide.Plugins
         private readonly Dictionary<ulong, float> lastDamageMessage = new Dictionary<ulong, float>();
         private const float ToggleRaycastDistance = 2f;
 
-        private readonly Dictionary<string, List<string>> legacyGroupItems = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
         private StoredData storedData;
 
         private class StoredData
         {
-            public Dictionary<ulong, HashSet<string>> SharedItemsByOwner = new Dictionary<ulong, HashSet<string>>();
-            public Dictionary<ulong, HashSet<string>> EnabledGroupsByOwner = new Dictionary<ulong, HashSet<string>>();
+            public Dictionary<ulong, HashSet<uint>> SharedEntitiesByOwner = new Dictionary<ulong, HashSet<uint>>();
         }
 
         private void Init()
         {
             permission.RegisterPermission(PermissionBypass, this);
-            RegisterLegacyGroupItems();
             LoadData();
         }
 
@@ -55,12 +52,8 @@ namespace Oxide.Plugins
         private void LoadData()
         {
             storedData = Interface.Oxide.DataFileSystem.ReadObject<StoredData>(Name) ?? new StoredData();
-            if (storedData.SharedItemsByOwner == null)
-                storedData.SharedItemsByOwner = new Dictionary<ulong, HashSet<string>>();
-            if (storedData.EnabledGroupsByOwner == null)
-                storedData.EnabledGroupsByOwner = new Dictionary<ulong, HashSet<string>>();
-
-            MigrateLegacyToggleGroups();
+            if (storedData.SharedEntitiesByOwner == null)
+                storedData.SharedEntitiesByOwner = new Dictionary<ulong, HashSet<uint>>();
         }
 
         private void OnServerSave()
@@ -73,121 +66,31 @@ namespace Oxide.Plugins
             SaveData();
         }
 
-        private void RegisterLegacyGroupItems()
+        private HashSet<uint> GetOwnerEntities(ulong ownerId)
         {
-            legacyGroupItems.Clear();
-
-            AddToggleItems("Building", new[]
+            HashSet<uint> entities;
+            if (!storedData.SharedEntitiesByOwner.TryGetValue(ownerId, out entities))
             {
-                "cupboard.tool"
-            });
-
-            AddToggleItems("Comfort", new[]
-            {
-                "bed",
-                "chair",
-                "sofa",
-                "sofa.pattern",
-                "bbq",
-                "campfire",
-                "electric.heater"
-            });
-
-            AddToggleItems("Crafting", new[]
-            {
-                "box.repair.bench",
-                "repairbench",
-                "research.table",
-                "researchtable",
-                "mixingtable",
-                "composter"
-            });
-
-            AddToggleItems("Farm", new[]
-            {
-                "bathtub.planter",
-                "planter.large",
-                "minecart.planter",
-                "rail.road.planter",
-                "planter.small",
-                "planter.triangle",
-                "triangle.rail.road.planter",
-                "hitchtrough"
-            });
-
-            AddToggleItems("Furnace", new[]
-            {
-                "electric.furnace",
-                "furnace",
-                "furnace.large",
-                "small.oil.refinery"
-            });
-
-            AddToggleItems("Storage", new[]
-            {
-                "box.wooden",
-                "box.wooden.large",
-                "locker",
-                "dropbox",
-                "mailbox",
-                "fridge",
-                "mini fridge"
-            });
-
-            AddToggleItems("Switch", new[]
-            {
-                "electrical.switch",
-                "switch"
-            });
-
-            AddToggleItems("Water", new[]
-            {
-                "water.catcher.small",
-                "water.catcher.large",
-                "water.barrel"
-            });
-        }
-
-        private void AddToggleItems(string legacyGroupName, IEnumerable<string> items)
-        {
-            List<string> legacyItems;
-            if (!legacyGroupItems.TryGetValue(legacyGroupName, out legacyItems))
-            {
-                legacyItems = new List<string>();
-                legacyGroupItems[legacyGroupName] = legacyItems;
+                entities = new HashSet<uint>();
+                storedData.SharedEntitiesByOwner[ownerId] = entities;
             }
 
-            foreach (string item in items)
-            {
-                legacyItems.Add(item.ToLowerInvariant());
-            }
+            return entities;
         }
 
-        private HashSet<string> GetOwnerItems(ulong ownerId)
+        private bool IsEntitySharedForOwner(ulong ownerId, uint entityId)
         {
-            HashSet<string> items;
-            if (!storedData.SharedItemsByOwner.TryGetValue(ownerId, out items))
-            {
-                items = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                storedData.SharedItemsByOwner[ownerId] = items;
-            }
-
-            return items;
+            HashSet<uint> entities = GetOwnerEntities(ownerId);
+            return entities.Contains(entityId);
         }
 
-        private bool IsItemSharedForOwner(ulong ownerId, string itemKey)
+        private void SetEntitySharedForOwner(ulong ownerId, uint entityId, bool enabled)
         {
-            HashSet<string> items = GetOwnerItems(ownerId);
-            return items.Contains(itemKey);
-        }
-
-        private void SetItemSharedForOwner(ulong ownerId, string itemKey, bool enabled)
-        {
-            HashSet<string> items = GetOwnerItems(ownerId);
+            HashSet<uint> entities = GetOwnerEntities(ownerId);
             if (enabled)
-                items.Add(itemKey);
+                entities.Add(entityId);
             else
-                items.Remove(itemKey);
+                entities.Remove(entityId);
         }
 
         private void NotifyInteraction(BasePlayer player, string message)
@@ -232,7 +135,7 @@ namespace Oxide.Plugins
 
             if (args.Length == 0)
             {
-                player.ChatMessage(Prefix + "Usage: /pve toggle [item.shortname]");
+                player.ChatMessage(Prefix + "Usage: /pve toggle");
                 return;
             }
 
@@ -254,36 +157,47 @@ namespace Oxide.Plugins
                 ListSharedItems(player);
                 return;
             }
-
-            string itemKey = string.Join(" ", args, 1, args.Length - 1);
-            HashSet<string> sharedItems = GetOwnerItems(player.userID);
-            if (sharedItems.Remove(itemKey))
-            {
-                SaveData();
-                player.ChatMessage(string.Format("{0}Stopped sharing {1}.", Prefix, GetItemDisplayName(itemKey)));
-                return;
-            }
-
-            player.ChatMessage(string.Format("{0}{1} is not currently shared.", Prefix, GetItemDisplayName(itemKey)));
+            player.ChatMessage(Prefix + "Usage: /pve toggle");
         }
 
         private void ListSharedItems(BasePlayer player)
         {
-            HashSet<string> sharedItems = GetOwnerItems(player.userID);
-            if (sharedItems.Count == 0)
+            HashSet<uint> sharedEntities = GetOwnerEntities(player.userID);
+            if (sharedEntities.Count == 0)
+            {
+                player.ChatMessage(Prefix + "You are not sharing any items.");
+                return;
+            }
+
+            List<string> entries = new List<string>();
+            List<uint> missingEntities = new List<uint>();
+            foreach (uint entityId in sharedEntities)
+            {
+                BaseEntity entity = BaseNetworkable.serverEntities.Find(new NetworkableId(entityId)) as BaseEntity;
+                if (entity == null)
+                {
+                    missingEntities.Add(entityId);
+                    continue;
+                }
+
+                string displayName = GetEntityDisplayName(entity);
+                entries.Add(string.Format("{0} ({1})", displayName, entityId));
+            }
+
+            if (missingEntities.Count > 0)
+            {
+                foreach (uint entityId in missingEntities)
+                    sharedEntities.Remove(entityId);
+                SaveData();
+            }
+
+            if (entries.Count == 0)
             {
                 player.ChatMessage(Prefix + "You are not sharing any items.");
                 return;
             }
 
             player.ChatMessage(Prefix + "You are sharing:");
-            List<string> entries = new List<string>();
-            foreach (string itemKey in sharedItems)
-            {
-                string displayName = GetItemDisplayName(itemKey);
-                entries.Add(string.Format("{0} ({1})", displayName, itemKey));
-            }
-
             entries.Sort(StringComparer.OrdinalIgnoreCase);
             foreach (string entry in entries)
             {
@@ -299,17 +213,22 @@ namespace Oxide.Plugins
             if (!TryGetLookEntity(player, out entity))
                 return false;
 
-            string itemKey;
-            string displayName;
-            if (!TryGetShareKeyForEntity(entity, out itemKey, out displayName))
+            if (!HasBuildingAccess(player, entity))
+            {
+                message = Msg_NoAccess;
+                return true;
+            }
+
+            if (entity.net == null)
                 return false;
 
-            bool enabled = !IsItemSharedForOwner(player.userID, itemKey);
-            SetItemSharedForOwner(player.userID, itemKey, enabled);
+            uint entityId = (uint)entity.net.ID.Value;
+            bool enabled = !IsEntitySharedForOwner(player.userID, entityId);
+            SetEntitySharedForOwner(player.userID, entityId, enabled);
             SaveData();
 
             string status = enabled ? "now sharing" : "no longer sharing";
-            message = string.Format("{0}You are {1} {2}.", Prefix, status, displayName);
+            message = string.Format("{0}You are {1} {2}.", Prefix, status, GetEntityDisplayName(entity));
             return true;
         }
 
@@ -332,7 +251,7 @@ namespace Oxide.Plugins
          * HELPERS
          * ========================= */
 
-        private bool SameTeam(BasePlayer player, ulong ownerId)
+        private bool AreSameTeam(BasePlayer player, ulong ownerId)
         {
             if (player == null)
                 return false;
@@ -388,7 +307,7 @@ namespace Oxide.Plugins
 
             if (ownerId != 0)
             {
-                if (SameTeam(player, ownerId))
+                if (AreSameTeam(player, ownerId))
                     return true;
             }
 
@@ -498,6 +417,19 @@ namespace Oxide.Plugins
             return dropped.playerSteamID == 0 && dropped.OwnerID == 0;
         }
 
+        private bool IsParachute(BaseEntity entity)
+        {
+            if (entity == null)
+                return false;
+
+            string shortName = entity.ShortPrefabName ?? string.Empty;
+            if (shortName.IndexOf("parachute", StringComparison.OrdinalIgnoreCase) >= 0)
+                return true;
+
+            string prefabName = entity.PrefabName ?? string.Empty;
+            return prefabName.IndexOf("parachute", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
         private bool IsVendingMachine(BaseEntity entity)
         {
             return entity is VendingMachine;
@@ -505,153 +437,36 @@ namespace Oxide.Plugins
 
         private bool IsToggleAccess(BaseEntity entity)
         {
-            if (entity == null)
+            if (entity == null || entity.net == null)
                 return false;
 
             ulong ownerId = GetOwnerId(entity);
             if (ownerId == 0)
                 return false;
 
-            HashSet<string> sharedItems = GetOwnerItems(ownerId);
-            if (sharedItems.Count == 0)
-                return false;
-
-            foreach (string itemKey in sharedItems)
-            {
-                if (EntityMatchesPrefabKey(entity, itemKey))
-                {
-                    return true;
-                }
-            }
-
-            return false;
+            return IsEntitySharedForOwner(ownerId, (uint)entity.net.ID.Value);
         }
 
-        private bool EntityMatchesPrefabKey(BaseEntity entity, string prefabKey)
+        private string GetEntityDisplayName(BaseEntity entity)
         {
-            if (entity == null || string.IsNullOrEmpty(prefabKey))
-                return false;
-
-            string shortName = entity.ShortPrefabName;
-            string prefabName = entity.PrefabName;
-            if (string.IsNullOrEmpty(shortName))
-                shortName = entity.PrefabName;
-            if (string.IsNullOrEmpty(shortName))
-                shortName = string.Empty;
-            else
-                shortName = shortName.ToLowerInvariant();
-
-            if (string.IsNullOrEmpty(prefabName))
-                prefabName = string.Empty;
-            else
-                prefabName = prefabName.ToLowerInvariant();
-
-            string normalizedShortName = NormalizePrefabKey(shortName);
-            string normalizedPrefabName = NormalizePrefabKey(prefabName);
-            string normalizedKey = NormalizePrefabKey(prefabKey);
-
-            if (prefabKey.Equals(shortName, StringComparison.OrdinalIgnoreCase))
-                return true;
-
-            if (!string.IsNullOrEmpty(normalizedKey) &&
-                normalizedKey.Equals(normalizedShortName, StringComparison.OrdinalIgnoreCase))
-                return true;
-
-            if (prefabName.IndexOf(prefabKey, StringComparison.OrdinalIgnoreCase) >= 0)
-                return true;
-
-            if (!string.IsNullOrEmpty(normalizedKey) &&
-                normalizedPrefabName.IndexOf(normalizedKey, StringComparison.OrdinalIgnoreCase) >= 0)
-                return true;
-
-            return false;
-        }
-
-        private bool TryGetShareKeyForEntity(BaseEntity entity, out string itemKey, out string displayName)
-        {
-            itemKey = null;
-            displayName = null;
             if (entity == null)
-                return false;
-
-            string shortName = entity.ShortPrefabName;
-            if (string.IsNullOrEmpty(shortName))
-                shortName = entity.PrefabName;
-
-            if (string.IsNullOrEmpty(shortName))
-                return false;
-
-            itemKey = shortName.ToLowerInvariant();
-            displayName = GetItemDisplayName(itemKey, entity);
-            return true;
-        }
-
-        private string GetItemDisplayName(string itemKey, BaseEntity entity = null)
-        {
-            if (string.IsNullOrEmpty(itemKey))
                 return "Unknown Item";
 
-            ItemDefinition definition = ItemManager.FindItemDefinition(itemKey);
-            if (definition != null && definition.displayName != null)
-                return definition.displayName.english;
+            string shortName = entity.ShortPrefabName;
+            if (!string.IsNullOrEmpty(shortName))
+            {
+                ItemDefinition definition = ItemManager.FindItemDefinition(shortName);
+                if (definition != null && definition.displayName != null)
+                    return definition.displayName.english;
+            }
 
-            if (entity != null && !string.IsNullOrEmpty(entity.ShortPrefabName))
+            if (!string.IsNullOrEmpty(entity.ShortPrefabName))
                 return entity.ShortPrefabName;
 
-            return itemKey;
-        }
+            if (!string.IsNullOrEmpty(entity.PrefabName))
+                return entity.PrefabName;
 
-        private string NormalizePrefabKey(string value)
-        {
-            if (string.IsNullOrEmpty(value))
-                return string.Empty;
-
-            char[] buffer = new char[value.Length];
-            int index = 0;
-            for (int i = 0; i < value.Length; i++)
-            {
-                char current = value[i];
-                if (char.IsLetterOrDigit(current))
-                {
-                    buffer[index] = char.ToLowerInvariant(current);
-                    index++;
-                }
-            }
-
-            return index == 0 ? string.Empty : new string(buffer, 0, index);
-        }
-
-        private void MigrateLegacyToggleGroups()
-        {
-            if (storedData == null || storedData.EnabledGroupsByOwner == null)
-                return;
-
-            if (storedData.SharedItemsByOwner == null)
-                storedData.SharedItemsByOwner = new Dictionary<ulong, HashSet<string>>();
-
-            bool migrated = false;
-            foreach (KeyValuePair<ulong, HashSet<string>> entry in storedData.EnabledGroupsByOwner)
-            {
-                if (entry.Value == null || entry.Value.Count == 0)
-                    continue;
-
-                HashSet<string> sharedItems = GetOwnerItems(entry.Key);
-                foreach (string groupName in entry.Value)
-                {
-                    List<string> legacyItems;
-                    if (!legacyGroupItems.TryGetValue(groupName, out legacyItems))
-                        continue;
-
-                    foreach (string itemKey in legacyItems)
-                    {
-                        sharedItems.Add(itemKey);
-                        migrated = true;
-                    }
-                }
-            }
-
-            if (migrated)
-                storedData.EnabledGroupsByOwner = new Dictionary<ulong, HashSet<string>>();
+            return "Unknown Item";
         }
 
         /* =========================
@@ -871,7 +686,7 @@ namespace Oxide.Plugins
             ulong ownerId = GetOwnerId(planter);
             if (ownerId != 0)
             {
-                if (ownerId == player.userID || SameTeam(player, ownerId))
+                if (ownerId == player.userID || AreSameTeam(player, ownerId))
                     return null;
             }
             else if (HasBuildingAccess(player, planter))
@@ -909,7 +724,7 @@ namespace Oxide.Plugins
 
             if (IsToggleAccess(mountable))
                 return null;
-
+			
             if (IsHumanNPC(mountable) || !IsPlayerPlaced(mountable))
                 return null;
 
@@ -992,6 +807,12 @@ namespace Oxide.Plugins
 
         private object CanPickupEntity(BasePlayer player, BaseEntity entity)
         {
+            if (IsParachute(entity))
+                return null;
+
+            if (IsHumanNPC(entity) || !IsPlayerPlaced(entity))
+                return null;
+
             if (HasBuildingAccess(player, entity))
                 return null;
 
@@ -1007,7 +828,7 @@ namespace Oxide.Plugins
             if (IsHumanNPC(target))
                 return null;
 
-            if (SameTeam(looter, target.userID))
+            if (AreSameTeam(looter, target.userID))
                 return null;
 
             NotifyInteraction(looter, Msg_NoSleeperLoot);
