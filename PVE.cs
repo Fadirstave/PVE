@@ -31,6 +31,16 @@ namespace Oxide.Plugins
         private readonly Dictionary<ulong, float> lastDamageMessage = new Dictionary<ulong, float>();
         private const float ToggleRaycastDistance = 2f;
 
+        private static readonly HashSet<string> NavalToggleShortNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "anchor",
+            "boatbuildingstation",
+            "cannon",
+            "sail",
+            "smallengine",
+            "steeringwheel.boat"
+        };
+
         private StoredData storedData;
 
         private class StoredData
@@ -213,6 +223,9 @@ namespace Oxide.Plugins
             if (!TryGetLookEntity(player, out entity))
                 return false;
 
+            if (GetOwnerId(entity) == 0 && !IsNavalToggleEntity(entity))
+                return false;
+
             if (!HasBuildingAccess(player, entity))
             {
                 message = Msg_NoAccess;
@@ -282,14 +295,18 @@ namespace Oxide.Plugins
 
         private ulong GetOwnerId(BaseEntity entity)
         {
-            if (entity == null)
-                return 0;
+            BaseEntity current = entity;
+            int depth = 0;
+            while (current != null && depth < 16)
+            {
+                if (current.OwnerID != 0)
+                    return current.OwnerID;
 
-            if (entity.OwnerID != 0)
-                return entity.OwnerID;
+                current = current.GetParentEntity();
+                depth++;
+            }
 
-            BaseEntity parent = entity.GetParentEntity();
-            return parent != null ? parent.OwnerID : 0;
+            return 0;
         }
 
         private bool HasBuildingAccess(BasePlayer player, BaseEntity entity)
@@ -318,6 +335,25 @@ namespace Oxide.Plugins
             return false;
         }
 
+        private bool IsNavalToggleEntity(BaseEntity entity)
+        {
+            if (entity == null)
+                return false;
+
+            string shortName = entity.ShortPrefabName ?? string.Empty;
+            if (NavalToggleShortNames.Contains(shortName))
+                return true;
+
+            string prefabName = entity.PrefabName ?? string.Empty;
+            foreach (string navalShortName in NavalToggleShortNames)
+            {
+                if (prefabName.IndexOf(navalShortName, StringComparison.OrdinalIgnoreCase) >= 0)
+                    return true;
+            }
+
+            return false;
+        }
+
         private bool IsPlayerPlaced(BaseEntity entity)
         {
             if (entity == null)
@@ -326,11 +362,14 @@ namespace Oxide.Plugins
             if (entity is BuildingPrivlidge)
                 return true;
 
+            if (IsNavalToggleEntity(entity))
+                return true;
+
             if (!string.IsNullOrEmpty(entity.PrefabName) &&
                 entity.PrefabName.IndexOf("/deployable/", StringComparison.OrdinalIgnoreCase) >= 0)
                 return true;
 
-            return entity.OwnerID != 0;
+            return GetOwnerId(entity) != 0;
         }
 
         private bool IsUnownedDeployable(BaseEntity entity)
