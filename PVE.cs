@@ -41,6 +41,18 @@ namespace Oxide.Plugins
             "steeringwheel.boat"
         };
 
+        private static readonly HashSet<string> UnownedInteractionDamageWhitelistPrefabs = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "assets/prefabs/misc/deepseadwellings/bunkercannon.prefab"
+        };
+
+        private static readonly HashSet<string> UnownedInteractionDamageWhitelistShortNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "bunkercannon",
+            "cannon.deployed",
+            "cannon.land.static"
+        };
+
         private StoredData storedData;
 
         private class StoredData
@@ -411,6 +423,28 @@ namespace Oxide.Plugins
             return GetOwnerId(entity) == 0;
         }
 
+        private bool IsWhitelistedUnownedInteractionDamageEntity(BaseEntity entity)
+        {
+            if (entity == null)
+                return false;
+
+            if (GetOwnerId(entity) != 0)
+                return false;
+
+            string shortName = entity.ShortPrefabName ?? string.Empty;
+            if (UnownedInteractionDamageWhitelistShortNames.Contains(shortName))
+                return true;
+
+            string prefabName = entity.PrefabName ?? string.Empty;
+            if (UnownedInteractionDamageWhitelistPrefabs.Contains(prefabName))
+                return true;
+
+            if (shortName.IndexOf("bunkercannon", StringComparison.OrdinalIgnoreCase) >= 0)
+                return true;
+
+            return prefabName.IndexOf("bunkercannon", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
         private bool IsHumanNPC(BaseEntity entity)
         {
             BasePlayer player = entity as BasePlayer;
@@ -528,6 +562,9 @@ namespace Oxide.Plugins
             if (attacker != null && IsUnownedDeployable(entity))
                 return null;
 
+            if (attacker != null && IsWhitelistedUnownedInteractionDamageEntity(entity))
+                return null;
+
             if (entity is BaseAnimalNPC || info.Initiator is BaseAnimalNPC)
                 return null;
 
@@ -567,6 +604,9 @@ namespace Oxide.Plugins
 
         private object CanInteract(BasePlayer player, BaseEntity entity)
         {
+            if (IsWhitelistedUnownedInteractionDamageEntity(entity))
+                return null;
+
             // ✅ Allow vending machine purchases
             if (IsVendingMachine(entity))
                 return null;
@@ -595,6 +635,9 @@ namespace Oxide.Plugins
             if (player == null || entity == null)
                 return null;
 
+            if (IsWhitelistedUnownedInteractionDamageEntity(entity))
+                return null;
+
             if (!(entity is ResearchTable) && !(entity is LiquidContainer))
                 return null;
 
@@ -613,6 +656,9 @@ namespace Oxide.Plugins
 
         private object CanUseEntity(BasePlayer player, BaseEntity entity)
         {
+            if (IsWhitelistedUnownedInteractionDamageEntity(entity))
+                return null;
+
             // ✅ Allow vending machine use
             if (IsVendingMachine(entity))
                 return null;
@@ -761,6 +807,9 @@ namespace Oxide.Plugins
             if (mountable == null)
                 return null;
 
+            if (IsWhitelistedUnownedInteractionDamageEntity(mountable))
+                return null;
+
             if (IsToggleAccess(mountable))
                 return null;
 			
@@ -809,7 +858,14 @@ namespace Oxide.Plugins
 
         private object CanUseLockedEntity(BasePlayer player, BaseLock lockEntity)
         {
+            if (lockEntity == null)
+                return null;
+
             BaseEntity parent = lockEntity.GetParentEntity();
+            if (IsWhitelistedUnownedInteractionDamageEntity(lockEntity) ||
+                IsWhitelistedUnownedInteractionDamageEntity(parent))
+                return null;
+
             if (parent != null && HasBuildingAccess(player, parent))
                 return null;
 
@@ -819,6 +875,9 @@ namespace Oxide.Plugins
 
         private object CanLootEntity(BasePlayer player, BaseEntity entity)
         {
+            if (IsWhitelistedUnownedInteractionDamageEntity(entity))
+                return null;
+
             if (IsVendingMachine(entity))
                 return null; // buying ≠ looting
 
